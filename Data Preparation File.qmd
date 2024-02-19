@@ -1,0 +1,190 @@
+---
+title: "Data Preparation File"
+author: "Shanshan Liu"
+format: docx
+editor: visual
+---
+
+## Libraries
+
+In the following code chunk, load all the libraries you will need:
+
+```{r}
+#load packages
+library(rio)
+library(stringr)
+library(lubridate)
+library(dplyr)
+library(fixest)
+```
+
+## Load Data
+
+```{r}
+# Specify the directory containing my files
+setwd("C:/5300 Applied Econometrics/Data Exploration Assignment/")
+# Specify the directory containing my files
+directory <- "Data_Exploration_Rawdata/Lab3_Rawdata/"
+
+# Use list.files() to get filenames matching the pattern "trends_up_to_"
+filenames <- list.files(directory, pattern = "^trends_up_to_", full.names = TRUE)
+
+# Read in the files and bind them together into a single dataset
+data <- import_list(filenames, rbind = TRUE, rbind_fill = TRUE)
+
+# drop the last column
+data <- data[, -7]
+
+# Get the first 10 characters out of the monthorweek variable
+data$monthorweek <- str_sub(data$monthorweek, 1, 10)
+
+# Convert the get string into an actual usable date variable
+data$date <- ymd(data$monthorweek)
+
+# Aggregate the dates to months (will "round down" all dates in the same month to be the first of the month)
+data$date <- floor_date(data$date, unit = "month")
+
+# Group by schoolname and keyword, standardize the index variable for week (school-week level)
+data <- data %>%
+  group_by(schname, keyword) %>%
+  mutate(index_standardized = (index - mean(index)) / sd(index))
+
+# Group by schoolname, year and month, calculate the sum of index_standardized for month (school-month level)
+data <- data %>%
+  mutate(year_month = format(date, "%Y-%m")) %>% 
+  group_by(schname, year_month) %>%
+  mutate(index_sdd_shmonth = sum(index_standardized))
+
+```
+
+## Load More Data
+
+```{r}
+# Read in the Scorecard data
+scorecard_data <- import("Most+Recent+Cohorts+(Scorecard+Elements).csv")
+
+# Read in the id_name_link file
+id_name_link <- import("id_name_link.csv")
+
+# Count how many times each school name pops up in id_name_link
+id_name_link<- id_name_link %>%
+  group_by(schname) %>%
+  mutate(n = n()) %>%
+  distinct() %>%     #keep only unique rows
+  filter(n == 1) %>% #keep only the rows where the count n=1
+  select(-n)         #remove the n column
+```
+
+## Merge Data
+
+```{r}
+# merge data, id_name_link and scorecard_data together 
+# Join data and id_name_link based on schname
+merged_data <- inner_join(data, id_name_link, by = "schname")
+
+# Join merged_data and scorecard_data based on UNITID and OPEID
+merged_data <- inner_join(merged_data, scorecard_data, by = c("unitid" = "UNITID", "opeid" = "OPEID"))
+```
+
+## Aggregate
+
+```{r}
+# Filter observations where PREDDGE equals 3 (keep bachelor's degree-granting universities)
+merged1 <- merged_data %>%
+  filter(PREDDEG == 3)
+
+# Rename the column
+merged1 <- merged1 %>%
+  rename(income = "md_earn_wne_p10-REPORTED-EARNINGS")
+
+merged2 <- merged1 %>%
+  select(-income, everything()) %>%
+  select(income, everything())
+
+# Convert income column from character to integer
+merged2 <- merged2 %>%
+  mutate(income = as.numeric(income))
+
+# count na
+na_count <- sum(is.na(merged2$income))
+print(na_count)
+
+na_count <- sum(is.na(merged1$income))
+print(na_count)
+
+# drop if income == NA
+merged2 <-merged2[complete.cases(merged2$income),]
+merged2 <-merged2[complete.cases(merged2$index_sdd_shmonth),]
+
+```
+
+## Define 'high income' and 'low income' college
+
+```{r}
+# Calculate the mean of the income column
+income_mean <- mean(merged2$income, na.rm = TRUE)
+print(income_mean)
+
+# Calculate the standard deviation of the income column
+income_sd <- sd(merged2$income, na.rm = TRUE)
+print(income_sd)
+
+# Calculate the quartiles of the income column
+income_quantile25 <- quantile(merged2$income, 0.25, na.rm = TRUE)
+income_quantile50 <- quantile(merged2$income, 0.50, na.rm = TRUE)
+income_quantile75 <- quantile(merged2$income, 0.75, na.rm = TRUE)
+
+print(paste("25th percentile:", income_quantile25))
+print(paste("50th percentile:", income_quantile50))
+print(paste("75th percentile:", income_quantile75))
+
+# Create 4 dummy variables
+# high75: income >= 75% quantile is 1, otherwise 0
+# high1sd: income >= income_mean + 1 standard deviation is 1, otherwise 0
+# high2sd: income >= income_mean + 2 standard deviation is 1, otherwise 0
+# highmean: income >= income_mean is 1, otherwise 0
+merged2 <- merged2 %>%
+  mutate(high75 = ifelse(income >= 49900, 1, 0),
+         `high1sd` = ifelse(income >= 55048.11, 1, 0),
+         `high2sd` = ifelse(income >= 66315.47, 1, 0),
+         highmean = ifelse(income >= 43780.75, 1, 0))
+
+
+```
+
+## Create dummy variable
+
+```{r}
+# Create the time dummy variable
+merged2 <- merged2 %>%
+  mutate(sept2015 = ifelse(date > as.Date("2015-09-01"), 1, 0))
+
+# Create the new variable 'year' by get the year from the 'date' column
+merged2 <- merged2 %>%
+  mutate(year = year(date))
+
+# Create 3 dummy variables
+# public: CONTROL == public is 1, otherwise 0
+# private_np: CONTROL == private nonprofit is 1, otherwise 0
+# private_fp: CONTROL == private for-profit is 1, otherwise 0
+
+merged2 <- merged2 %>%
+  mutate(public = ifelse(CONTROL == 1 , 1, 0),
+         private_np = ifelse(CONTROL == 2, 1, 0),
+         private_fp = ifelse(CONTROL == 3, 1, 0))
+```
+
+## Extract the variable used
+
+```{r}
+#selected_df <- merged2[merged2$income > 44000, c('income','high75', 'high1sd', 'high2sd', 'highmean','public', 'private_np', 'private_fp')]
+selected_df <- merged2[c('unitid','STABBR','income','index_sdd_shmonth','year_month','year','sept2015', 'high75', 'high1sd', 'high2sd', 'highmean', 'public', 'private_np', 'private_fp')] %>%
+  distinct()
+```
+
+## Save the cleaned data to a file
+
+```{r}
+rio::export(selected_df, file = "selected_df.csv", format = "csv")
+
+```

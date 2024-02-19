@@ -1,0 +1,86 @@
+---
+title: "Analysis File"
+author: "Shanshan Liu"
+format: docx
+editor: visual
+---
+
+**Introduction**: The primary purpose of this data exploration project is to investigate whether the release of earnings in the College Scorecard dataset in early September, 2015 has led to a shift in the preferences of prospective students towards universities with high-income graduates. In the research, the Google trend index has been used as a proxy of people’s preference towards colleges. The Google Trends data provides insights into the relative search popularity of keywords over time and the data can be used to discern patterns in search activity associated with universities. Through analysis and interpretation of these data compared with search popularity (search frequency), it can be analyzed whether the release of earnings in the Scorecard dataset has resulted in students' interest turning towards high-income universities. This project has focused on the universities which primarily grant bachelor's degrees.
+
+**Methodology**: The following DiD regression is analyzed using Ordinary Least Square.
+
+*Index~it~* =*β*~0~​+*β*~1~ ​*HighIncome~i~+β*~2~ ​*Sept2015~it~+β*~3~ ​*HighIncome~i~\*Sept2015~it~* + *β* C~i~
+
+\+ *α~s~ + α~t~* + *ε*
+
+Where subscript *i* stands for college, subscript *t* stands for month, and *s* stands for state. *Index~it~* is the standardized Google Trend Index aggregated for each college and in each month. *HighIncome~i~ = \[high75~i~; highmean~i~\]* is a set of dummy variables that represent colleges with high-income students. *High75~i~ equals one if* the median earnings of graduates from college *i* 10 years after graduation ishigher than the 75th percentile in the sample. *Highmean~i~* equals one if the median earning of graduates from college *i* 10 years after graduation is higher than the average income. Both dummies are examined in this project. *Sept2015~it~* is a dummy variable that equals one if the index was recorded in or after September 2015. The coefficient on the interaction term, *β*~3,~ is the coefficient of interest, which tells the impact of releasing earning data on online-searching activity of college-related keywords.  
+
+*α~s~* and *α~t~*are state and year fixed effects respectively. Different states may have different economic environments and social policies, which could influence university preferences. Adding state fixed effects in the regression model helps control for these state-level characteristics, allowing for a more accurate assessment of the impact of earnings releases on university preferences. As time progresses, changes in economic environments and social policies may occur, which could also affect university preferences and search activities. Introducing year fixed effects into the regression model helps control for these time trends.
+
+*C~i~* stands for control variables. I have controlled the types of ownership of schools and included dummies for public schools and private not-for-profit. The third type of ownership, private for-profit, is omitted to avoid collinearity. I believe that public schools and private schools may simultaneously influence graduate income and people's interest in searching for related universities. Controlling for them can help eliminate the influence of these factors on preferences for high-income universities, making the impact of university scorecards on university preferences more accurate.
+
+## Libraries
+
+In the following code chunk, load all the libraries you will need:
+
+```{r}
+#load packages
+library(rio)
+library(stringr)
+library(lubridate)
+library(dplyr)
+library(fixest)
+```
+
+## Load Data
+
+```{r}
+# Specify the directory containing my files
+setwd("C:/5300 Applied Econometrics/Data Exploration Assignment/")
+selected_df <- rio::import('selected_df.csv')
+```
+
+## Run regression model
+
+```{r}
+# regression model with fixed effect
+#model2 <-feols(index_sdd_shmonth ~ sept2015 + high75 + sept2015:high75 + public + private_np ,  data = selected_df, fixef = 'year',vcov = 'hetero')
+model1 <-feols(index_sdd_shmonth ~ sept2015 + high75 + sept2015:high75 + public + private_np + factor(year) + factor(STABBR) ,  data = selected_df, vcov = 'hetero')
+summary(model1)
+
+# regression model with interaction highmean 
+#model5 <- feols(index_sdd_shmonth ~ sept2015 + highmean + sept2015:highmean + public + private_np, fixef = 'year', data = selected_df, vcov = 'hetero')
+model2 <- feols(index_sdd_shmonth ~ sept2015 + highmean + sept2015:highmean + public + private_np + factor(year) + factor(STABBR) , data = selected_df, vcov = 'hetero')
+summary(model2)
+```
+
+## Display result of regression 
+
+```{r}
+etable(model1)
+```
+
+The table above shows the coefficients from estimating model1 in which *high75~i~* is used as the dummy for high income. The coefficient on the interaction term, -2.293, suggests that the introduction of the College Scorecard decreased search activity on Google Trends for colleges with high-earning graduates by -2.293 standard deviation relative to what it did for colleges with low-earning graduates, with a standard error of 0.3295. This coefficient is significant at the 1% level. State and year fixed effects are controlled for in the regression. Robust standard errors are reported in the parentheses.
+
+```{r}
+etable(model2)
+```
+
+*Model2* is examined with *highmean~i~* being the dummy for high income. Other aspects are help constant as in *model1*. The results are similar. The coefficient on the interaction term is -1.332, suggesting that the introduction of the College Scorecard decreased search activity on Google Trends for colleges with above-average earning graduates by 1.332 standard deviations relative to colleges with below-average earning graduates. This effect is statistically significant at the 1% level. State and year fixed effects are controlled for in the regression. Robust standard errors are reported in the parentheses.
+
+## Draw a graph
+
+```{r}
+res1 <- residuals(model1)
+
+#produce residual vs fitted plot
+plot(fitted(model1), res1, xlab = "Fitted Value", ylab = "Residual")
+
+# add a horizontal line at 0
+abline(0,0)
+
+```
+
+The graph shows the residual vs. the fitted value of *model1* in which *high75~i~* is used as the dummy variable for high income. It can be clearly seen that the magnitude of dispersion is not constant as the fitted value increases. For example, the level of dispersion of points is lower when the fitted value is around 4. It is higher when the value is above 2. This shows evidence of heteroskedasticity presented in the data. To solve this problem, I have included robust standard errors in the regressions.
+
+**Conclusion**: Both regressions show consistent negative relationships. Results suggest that the search activity for colleges with high-income graduates had decreased after the release of earning data in Scorecards datasets. Controlling for variables like school type and introducing fixed effects for state and year helps provide a more accurate assessment. These findings contribute to our understanding of the factors influencing students' college preferences in the context of the College Scorecard release. It will be interesting to dig deeper into this topic and find out the reason behind the negative relationship.
